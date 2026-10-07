@@ -1,0 +1,319 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fractal explorer</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌀</text></svg>">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #f3eedf;
+    --ink-soft: #b9b2a1;
+    --glass: rgba(18, 16, 28, 0.74);
+    --edge: rgba(243, 238, 223, 0.14);
+    --gold: #e8bf5a;
+    --font: "Figtree", system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; background: #000; }
+  body { font-family: var(--font); color: var(--ink); }
+  #map { position: fixed; inset: 0; background: #000; cursor: crosshair; }
+  .leaflet-container { background: #000; font-family: var(--font); }
+  .leaflet-tile { image-rendering: auto; }
+
+  .panel {
+    position: fixed; z-index: 1000;
+    background: var(--glass);
+    backdrop-filter: blur(14px) saturate(140%);
+    -webkit-backdrop-filter: blur(14px) saturate(140%);
+    border: 1px solid var(--edge);
+    border-radius: 14px;
+  }
+
+  #controls { top: 16px; left: 16px; width: 270px; padding: 18px 18px 14px; }
+  h1 {
+    margin: 0 0 14px; font-size: 1.55rem; font-weight: 800; letter-spacing: -0.02em;
+    line-height: 1;
+  }
+  h1 button {
+    all: unset; cursor: pointer; display: flex; align-items: center; justify-content: space-between; width: 100%;
+  }
+  h1 .chev { font-size: 0.9rem; color: var(--ink-soft); transition: transform .2s; }
+  #controls.collapsed .body { display: none; }
+  #controls.collapsed h1 { margin: 0; }
+  #controls.collapsed .chev { transform: rotate(-90deg); }
+
+  .field { margin-bottom: 13px; }
+  .field label { display: flex; justify-content: space-between; font-size: 0.82rem; color: var(--ink-soft); margin-bottom: 5px; }
+  .field label output { color: var(--ink); font-variant-numeric: tabular-nums; }
+
+  select, input[type=number] {
+    width: 100%; font: inherit; font-size: 0.95rem; color: var(--ink);
+    background: rgba(255,255,255,0.06); border: 1px solid var(--edge); border-radius: 8px;
+    padding: 7px 9px;
+  }
+  select option { background: #1b1828; }
+  input[type=range] { width: 100%; accent-color: var(--gold); }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  #juliaFields[hidden] { display: none; }
+
+  .row { display: flex; gap: 8px; margin-top: 4px; }
+  button.btn {
+    flex: 1; font: inherit; font-size: 0.88rem; font-weight: 600; cursor: pointer;
+    color: var(--ink); background: rgba(255,255,255,0.07);
+    border: 1px solid var(--edge); border-radius: 8px; padding: 8px 6px;
+  }
+  button.btn:hover { background: rgba(255,255,255,0.13); }
+  button.btn.primary { background: var(--gold); color: #1d170a; border-color: transparent; }
+  button.btn.primary:hover { filter: brightness(1.08); }
+  :focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+
+  .hint { font-size: 0.78rem; color: var(--ink-soft); line-height: 1.45; margin: 12px 0 0; }
+
+  #readout {
+    bottom: 16px; left: 16px; padding: 9px 13px; font-size: 0.82rem;
+    font-variant-numeric: tabular-nums; line-height: 1.5; pointer-events: none;
+  }
+  #readout b { font-weight: 600; color: var(--gold); }
+
+  #toast {
+    position: fixed; z-index: 1001; top: 18px; left: 50%; transform: translate(-50%, -12px);
+    padding: 8px 14px; opacity: 0; transition: opacity .2s, transform .2s; pointer-events: none; font-size: 0.88rem;
+  }
+  #toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+  .leaflet-bar a { background: var(--glass); color: var(--ink); border-color: var(--edge) !important; }
+  .leaflet-bar a:hover { background: rgba(40,36,56,0.9); color: var(--ink); }
+
+  @media (max-width: 560px) {
+    #controls { left: 10px; right: 10px; top: 10px; width: auto; }
+    #readout { left: 10px; bottom: 10px; font-size: 0.75rem; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<div id="map" aria-label="Fractal view. Drag to pan, scroll to zoom."></div>
+
+<section id="controls" class="panel">
+  <h1><button id="collapse" aria-expanded="true">Fractal explorer <span class="chev">▾</span></button></h1>
+  <div class="body">
+    <div class="field">
+      <label for="kind">Fractal</label>
+      <select id="kind">
+        <option value="mandelbrot">Mandelbrot set</option>
+        <option value="julia">Julia set</option>
+        <option value="ship">Burning Ship</option>
+        <option value="tricorn">Tricorn</option>
+      </select>
+    </div>
+
+    <div class="field" id="juliaFields" hidden>
+      <label>Julia constant c</label>
+      <div class="pair">
+        <input type="number" id="cre" step="0.001" aria-label="Real part of c">
+        <input type="number" id="cim" step="0.001" aria-label="Imaginary part of c">
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="palette">Colours</label>
+      <select id="palette">
+        <option value="0">Rainbow</option>
+        <option value="1">Ember</option>
+        <option value="2">Lagoon</option>
+        <option value="3">Electric</option>
+        <option value="4">Silver</option>
+      </select>
+    </div>
+
+    <div class="field">
+      <label for="density">Colour bands <output id="densityOut"></output></label>
+      <input type="range" id="density" min="0.2" max="5" step="0.1">
+    </div>
+
+    <div class="field">
+      <label for="detail">Detail <output id="detailOut"></output></label>
+      <input type="range" id="detail" min="0.5" max="6" step="0.5">
+    </div>
+
+    <div class="row">
+      <button class="btn" id="reset">Reset view</button>
+      <button class="btn primary" id="share">Copy link</button>
+    </div>
+
+    <p class="hint">Scroll or pinch to zoom, drag to pan. Right-click (or long-press) anywhere on the Mandelbrot set to open the Julia set for that point.</p>
+  </div>
+</section>
+
+<div id="readout" class="panel"></div>
+<div id="toast" class="panel" role="status"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+// Must match Kind::center() in main.rs
+const CENTERS = {
+  mandelbrot: [-0.5, 0.0],
+  julia:      [ 0.0, 0.0],
+  ship:       [-0.4, 0.5],
+  tricorn:    [-0.3, 0.0],
+};
+const MAX_ZOOM = 46;
+
+const $ = id => document.getElementById(id);
+const state = {
+  kind: "mandelbrot", palette: 0, density: 1, detail: 1,
+  cre: -0.8, cim: 0.156,
+};
+
+// ---- coordinate conversion: complex plane <-> Leaflet zoom-0 pixels ----
+function toComplex(latlng) {
+  const p = map.project(latlng, 0);
+  const [cx, cy] = CENTERS[state.kind];
+  return [(cx - 2) + p.x / 64, (cy + 2) - p.y / 64];
+}
+function toLatLng(re, im) {
+  const [cx, cy] = CENTERS[state.kind];
+  return map.unproject([(re - (cx - 2)) * 64, ((cy + 2) - im) * 64], 0);
+}
+
+// ---- map ----
+const map = L.map("map", {
+  crs: L.CRS.Simple,
+  minZoom: 0,
+  maxZoom: MAX_ZOOM,
+  zoomControl: false,
+  attributionControl: false,
+  wheelPxPerZoomLevel: 90,
+});
+L.control.zoom({ position: "bottomright" }).addTo(map);
+
+function tileUrl() {
+  const q = new URLSearchParams({
+    kind: state.kind, palette: state.palette,
+    density: state.density, detail: state.detail,
+  });
+  if (state.kind === "julia") { q.set("cre", state.cre); q.set("cim", state.cim); }
+  return `tile/{z}/{x}/{y}?${q}`;
+}
+
+const layer = L.tileLayer(tileUrl(), {
+  tileSize: 256, maxZoom: MAX_ZOOM, maxNativeZoom: MAX_ZOOM,
+  keepBuffer: 3, updateWhenZooming: false,
+}).addTo(map);
+
+function refresh() { layer.setUrl(tileUrl()); saveHash(); }
+
+function resetView() {
+  map.fitBounds(L.latLngBounds(map.unproject([0, 256], 0), map.unproject([256, 0], 0)));
+}
+
+// ---- controls ----
+function syncControls() {
+  $("kind").value = state.kind;
+  $("palette").value = state.palette;
+  $("density").value = state.density;
+  $("detail").value = state.detail;
+  $("densityOut").textContent = (+state.density).toFixed(1);
+  $("detailOut").textContent = (+state.detail).toFixed(1) + "×";
+  $("cre").value = state.cre;
+  $("cim").value = state.cim;
+  $("juliaFields").hidden = state.kind !== "julia";
+}
+
+$("kind").addEventListener("change", e => {
+  state.kind = e.target.value; syncControls(); refresh(); resetView();
+});
+$("palette").addEventListener("change", e => { state.palette = +e.target.value; refresh(); });
+for (const id of ["density", "detail"]) {
+  $(id).addEventListener("input", e => { state[id] = +e.target.value; syncControls(); });
+  $(id).addEventListener("change", refresh); // only re-render when the slider is released
+}
+for (const id of ["cre", "cim"]) {
+  $(id).addEventListener("change", e => {
+    const v = parseFloat(e.target.value);
+    if (!Number.isNaN(v)) { state[id] = v; refresh(); }
+  });
+}
+$("reset").addEventListener("click", resetView);
+$("share").addEventListener("click", async () => {
+  saveHash();
+  try { await navigator.clipboard.writeText(location.href); toast("Link copied"); }
+  catch { toast("Copy the link from the address bar"); }
+});
+$("collapse").addEventListener("click", () => {
+  const c = $("controls").classList.toggle("collapsed");
+  $("collapse").setAttribute("aria-expanded", String(!c));
+});
+
+// Right-click on Mandelbrot: jump to the matching Julia set
+map.on("contextmenu", e => {
+  if (state.kind !== "mandelbrot") return;
+  const [re, im] = toComplex(e.latlng);
+  state.kind = "julia";
+  state.cre = +re.toFixed(6);
+  state.cim = +im.toFixed(6);
+  syncControls(); refresh(); resetView();
+  toast(`Julia set for c = ${fmt(re, 5)} ${im < 0 ? "−" : "+"} ${fmt(Math.abs(im), 5)}i`);
+});
+
+// ---- readout ----
+function fmt(n, d) { return n.toFixed(d).replace("-", "−"); }
+let mouse = null;
+function updateReadout() {
+  const z = map.getZoom();
+  const digits = Math.min(16, 3 + Math.ceil(z * 0.31));
+  const [re, im] = toComplex(mouse || map.getCenter());
+  const mag = Math.pow(2, z);
+  const magText = mag >= 1e6 ? mag.toExponential(1).replace("e+", " × 10^") : Math.round(mag).toLocaleString();
+  $("readout").innerHTML =
+    `<b>${magText}×</b> zoom<br>` +
+    `${fmt(re, digits)} ${im < 0 ? "−" : "+"} ${Math.abs(im).toFixed(digits)}i`;
+}
+map.on("mousemove", e => { mouse = e.latlng; updateReadout(); });
+map.on("mouseout", () => { mouse = null; updateReadout(); });
+map.on("zoomend moveend", () => { updateReadout(); saveHash(); });
+
+// ---- shareable URL hash ----
+function saveHash() {
+  const [re, im] = toComplex(map.getCenter());
+  const q = new URLSearchParams({
+    k: state.kind, z: map.getZoom(), re: re.toPrecision(17), im: im.toPrecision(17),
+    p: state.palette, d: state.density, q: state.detail,
+  });
+  if (state.kind === "julia") { q.set("cre", state.cre); q.set("cim", state.cim); }
+  history.replaceState(null, "", "#" + q);
+}
+function loadHash() {
+  const q = new URLSearchParams(location.hash.slice(1));
+  if (!q.has("k")) return false;
+  if (CENTERS[q.get("k")]) state.kind = q.get("k");
+  const num = (key, fallback) => { const v = parseFloat(q.get(key)); return Number.isFinite(v) ? v : fallback; };
+  state.palette = num("p", 0);
+  state.density = num("d", 1);
+  state.detail = num("q", 1);
+  state.cre = num("cre", state.cre);
+  state.cim = num("cim", state.cim);
+  syncControls(); layer.setUrl(tileUrl());
+  map.setView(toLatLng(num("re", 0), num("im", 0)), Math.min(MAX_ZOOM, num("z", 2)));
+  return true;
+}
+
+// ---- toast ----
+let toastTimer;
+function toast(msg) {
+  const t = $("toast"); t.textContent = msg; t.classList.add("show");
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove("show"), 2200);
+}
+
+// ---- start ----
+syncControls();
+if (!loadHash()) resetView();
+updateReadout();
+</script>
+</body>
+</html>

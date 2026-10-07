@@ -1,0 +1,8 @@
+services:
+  fractal:
+    build: .
+    container_name: fractal-explorer
+    restart: unless-stopped
+    ports:
+      # Only reachable from the VPS itself; nginx handles the public side
+      - "127.0.0.1:8085:8080"
